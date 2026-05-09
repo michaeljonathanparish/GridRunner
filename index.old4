@@ -271,40 +271,13 @@
   // The level shape itself can be irregular (cells removed) at higher levels.
 
   function makeLevel(n) {
-    // Difficulty curve — gentle, with new enemies introduced slow and ramping up.
-    // Grid grows steadily so the player has more room to evade as threats add up.
-    const size = Math.min(3 + Math.floor(n / 1.5), 9);              // 3..9 cells per side
-    const gapChance = Math.min(0.04 + n * 0.018, 0.26);             // softer gap ramp
-    const cellRemoveChance = n >= 4 ? Math.min((n-3) * 0.035, 0.18) : 0; // irregular from L4
-
-    // Enemy count: introduces one at a time, well-spaced.
-    //   L1     → 0
-    //   L2-5   → 1
-    //   L6-9   → 2
-    //   L10-13 → 3
-    //   L14+   → 4
-    let enemyCount = 0;
-    if (n >= 2)  enemyCount = 1;
-    if (n >= 6)  enemyCount = 2;
-    if (n >= 10) enemyCount = 3;
-    if (n >= 14) enemyCount = 4;
-
-    // Each enemy has its own speed based on how long it's been around.
-    // An enemy "introduced" at level L gets a base speed and ramps up over the
-    // following ~8 levels until it caps. A freshly introduced enemy is noticeably
-    // slower so the player has time to read it.
-    const enemyIntroLevel = [2, 6, 10, 14]; // when each enemy first appears
-    const enemySpeeds = [];
-    for (let i = 0; i < enemyCount; i++) {
-      const intro = enemyIntroLevel[i];
-      const tenure = n - intro;                            // levels since this enemy joined
-      const ramp = Math.min(tenure / 8, 1);                // 0..1 over 8 levels
-      const speed = 2.0 + ramp * 1.6;                      // 2.0 → 3.6 cells/sec
-      enemySpeeds.push(speed);
-    }
-
-    // Player speed grows slowly so they keep an edge over fresh enemies.
-    const playerSpeed = 4.0 + Math.min(n, 12) * 0.18;      // 4.18 → 6.16 by L12, then flat
+    // Difficulty curve
+    const size = Math.min(3 + Math.floor(n / 1.5), 9);  // 3..9 cells per side
+    const enemies = Math.min(Math.floor(n / 2), 4);     // 0..4 enemies
+    const gapChance = Math.min(0.05 + n * 0.025, 0.28); // walls inserted
+    const cellRemoveChance = n >= 3 ? Math.min((n-2) * 0.04, 0.18) : 0; // irregular shape
+    const playerSpeed = 4.0 + n * 0.25;                 // cells/sec
+    const enemySpeed = 2.4 + n * 0.30;
 
     // Build cell grid; mark some cells as "absent" to make irregular shape
     const cells = [];
@@ -367,7 +340,7 @@
       if (cells[y][x]) { start = [x,y]; break outer; }
     }
 
-    // Place enemies far from player, each with their own speed
+    // Place enemies far from player
     const enemyStarts = [];
     const dists = bfsDistances(cells, edges, size, start);
     const sortedCells = [];
@@ -375,18 +348,14 @@
       if (cells[y][x] && dists[y][x] !== Infinity) sortedCells.push([x,y,dists[y][x]]);
     }
     sortedCells.sort((a,b) => b[2]-a[2]);
-    for (let i = 0; i < enemyCount && i < sortedCells.length; i++) {
-      enemyStarts.push({
-        x: sortedCells[i][0],
-        y: sortedCells[i][1],
-        speed: enemySpeeds[i],
-      });
+    for (let i = 0; i < enemies && i < sortedCells.length; i++) {
+      enemyStarts.push([sortedCells[i][0], sortedCells[i][1]]);
     }
 
     return {
       n, size, cells, edges,
       start, enemyStarts,
-      playerSpeed,
+      playerSpeed, enemySpeed,
     };
   }
 
@@ -526,8 +495,8 @@
       progress: 0, // 0..1 along current move
       target: null,
     };
-    state.enemies = state.level.enemyStarts.map(({x, y, speed}) => ({
-      x, y, fx:x, fy:y, progress:0, target:null, speed,
+    state.enemies = state.level.enemyStarts.map(([x,y]) => ({
+      x, y, fx:x, fy:y, progress:0, target:null,
     }));
     state.queued = null;
     // Camera starts on player, snapped (no lerp on first frame)
@@ -709,7 +678,7 @@
           }
         }
       }
-      tickActor(en, en.speed, dt);
+      tickActor(en, lvl.enemySpeed, dt);
     }
 
     // collision: distance between player and any enemy in cell-space
