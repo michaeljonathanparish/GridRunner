@@ -107,51 +107,41 @@
   @keyframes blink { 50% { opacity: 0.25; } }
   .hidden { display: none !important; }
 
-  /* Split touch controls: up/down on the left, left/right on the right.
-     Hidden by default; shown when body has .touch class. */
-  #pad-left, #pad-right {
+  /* On-screen D-pad for touch devices. Hidden by default; shown when body has .touch class. */
+  #dpad {
     position: fixed;
-    bottom: 24px;
+    left: 50%; bottom: 24px;
+    transform: translateX(-50%);
+    width: 240px; height: 240px;
     display: none;
     z-index: 5;
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
   }
-  body.touch #pad-left, body.touch #pad-right { display: block; }
+  body.touch #dpad { display: block; }
   body.touch #hud { font-size: 11px; padding: 0 12px; }
-  /* Left cluster: up over down, stacked vertically */
-  #pad-left {
-    left: 18px;
-    width: 120px; height: 248px; /* 120 + 8 gap + 120 */
-  }
-  /* Right cluster: left and right side by side */
-  #pad-right {
-    right: 18px;
-    width: 248px; height: 120px;
-    bottom: 88px; /* lifted so the cluster is roughly thumb-aligned with the left one */
-  }
-  .pad-btn {
+  #dpad .btn {
     position: absolute;
-    width: 120px; height: 120px;
+    width: 80px; height: 80px;
     display: grid; place-items: center;
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.25);
-    border-radius: 16px;
+    border-radius: 12px;
     color: var(--fg);
-    font-size: 44px;
+    font-size: 30px;
     line-height: 1;
     -webkit-tap-highlight-color: transparent;
   }
-  .pad-btn.active {
+  #dpad .btn.active {
     background: rgba(41,182,255,0.25);
     border-color: var(--player);
     color: var(--player);
   }
-  #pad-left  .up    { top: 0; left: 0; }
-  #pad-left  .down  { bottom: 0; left: 0; }
-  #pad-right .left  { top: 0; left: 0; }
-  #pad-right .right { top: 0; right: 0; }
+  #dpad .up    { top: 0;       left: 80px; }
+  #dpad .down  { bottom: 0;    left: 80px; }
+  #dpad .left  { top: 80px;    left: 0; }
+  #dpad .right { top: 80px;    right: 0; }
 
   /* Touch overlays: bigger tap targets, scrollable if keyboard appears */
   body.touch .panel { padding: 22px 24px; min-width: 0; max-width: 86vw; }
@@ -196,13 +186,11 @@
   </div>
 </div>
 
-<div id="pad-left" aria-hidden="true">
-  <div class="pad-btn up"    data-dir="up">▲</div>
-  <div class="pad-btn down"  data-dir="down">▼</div>
-</div>
-<div id="pad-right" aria-hidden="true">
-  <div class="pad-btn left"  data-dir="left">◀</div>
-  <div class="pad-btn right" data-dir="right">▶</div>
+<div id="dpad" aria-hidden="true">
+  <div class="btn up"    data-dir="up">▲</div>
+  <div class="btn left"  data-dir="left">◀</div>
+  <div class="btn right" data-dir="right">▶</div>
+  <div class="btn down"  data-dir="down">▼</div>
 </div>
 
 <script>
@@ -227,9 +215,7 @@
   function resize() {
     const isTouchLayout = document.body.classList.contains("touch");
     if (isTouchLayout) {
-      // Left cluster is 248px tall, sits with 24px bottom margin → pads occupy ~272px from bottom.
-      // Add some breathing room so the player isn't hidden behind buttons.
-      const reservedBottom = 300;
+      const reservedBottom = 290; // 240px D-pad + 24px bottom + breathing room
       const reservedTop = 40;     // HUD
       cvs.width = Math.max(280, window.innerWidth - 10);
       cvs.height = Math.max(280, window.innerHeight - reservedTop - reservedBottom);
@@ -856,7 +842,7 @@
     keys[code] = false;
     if (btnEl) btnEl.classList.remove("active");
   }
-  document.querySelectorAll(".pad-btn").forEach((btn) => {
+  document.querySelectorAll("#dpad .btn").forEach((btn) => {
     const dir = btn.dataset.dir;
     btn.addEventListener("touchstart", (e) => {
       e.preventDefault();
