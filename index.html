@@ -239,7 +239,6 @@
     const d = dirOf(e.code);
     if (d && state.phase === "play") {
       state.queued = d;
-      state.queuedAt = performance.now();
     }
   });
   window.addEventListener("keyup", (e) => { keys[e.code] = false; });
@@ -579,7 +578,6 @@
   function update(dt) {
     const lvl = state.level;
     const p = state.player;
-    const now = performance.now();
 
     // continuous input: held direction (used as the "default" travel)
     let held = null;
@@ -588,15 +586,10 @@
     else if (keys["ArrowLeft"] || keys["KeyA"]) held = [-1,0];
     else if (keys["ArrowRight"] || keys["KeyD"]) held = [1,0];
 
-    // Buffer: a queued direction is valid if pressed within the last 250ms.
-    // This lets the player pre-press a turn before reaching the intersection.
-    const BUFFER_MS = 250;
-    let buffered = null;
-    if (state.queued && state.queuedAt && now - state.queuedAt < BUFFER_MS) {
-      buffered = state.queued;
-    } else {
-      state.queued = null;
-    }
+    // Queued direction persists indefinitely — taken at the next intersection
+    // where it's a valid path. Cleared when consumed or when player presses
+    // a different direction. (Pac-Man-style "next available turn" input.)
+    const buffered = state.queued;
 
     // Mid-segment: try to honour a buffered REVERSE (180°) immediately so
     // backtracking feels instant, but only on the same line.
@@ -801,7 +794,7 @@
     keys[code] = true;
     if (state.phase === "play") {
       const d = dirOf(code);
-      if (d) { state.queued = d; state.queuedAt = performance.now(); }
+      if (d) { state.queued = d; }
     }
     if (btnEl) btnEl.classList.add("active");
   }
