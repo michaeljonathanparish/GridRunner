@@ -110,9 +110,8 @@
   /* On-screen D-pad for touch devices. Hidden by default; shown when body has .touch class. */
   #dpad {
     position: fixed;
-    left: 50%; bottom: 24px;
-    transform: translateX(-50%);
-    width: 240px; height: 240px;
+    right: 18px; bottom: 18px;
+    width: 168px; height: 168px;
     display: none;
     z-index: 5;
     touch-action: none;
@@ -123,13 +122,13 @@
   body.touch #hud { font-size: 11px; padding: 0 12px; }
   #dpad .btn {
     position: absolute;
-    width: 80px; height: 80px;
+    width: 56px; height: 56px;
     display: grid; place-items: center;
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.25);
-    border-radius: 12px;
+    border-radius: 8px;
     color: var(--fg);
-    font-size: 30px;
+    font-size: 22px;
     line-height: 1;
     -webkit-tap-highlight-color: transparent;
   }
@@ -138,18 +137,17 @@
     border-color: var(--player);
     color: var(--player);
   }
-  #dpad .up    { top: 0;       left: 80px; }
-  #dpad .down  { bottom: 0;    left: 80px; }
-  #dpad .left  { top: 80px;    left: 0; }
-  #dpad .right { top: 80px;    right: 0; }
+  #dpad .up    { top: 0;       left: 56px; }
+  #dpad .down  { bottom: 0;    left: 56px; }
+  #dpad .left  { top: 56px;    left: 0; }
+  #dpad .right { top: 56px;    right: 0; }
 
   /* Touch overlays: bigger tap targets, scrollable if keyboard appears */
   body.touch .panel { padding: 22px 24px; min-width: 0; max-width: 86vw; }
   body.touch .panel h1 { font-size: 22px; letter-spacing: 0.32em; }
   body.touch .panel input { width: 70vw; max-width: 240px; font-size: 16px; }
   body.touch .overlay { align-items: start; padding-top: 8vh; }
-  body.touch #wrap { align-items: start; padding-top: 40px; justify-items: stretch; }
-  body.touch canvas { box-shadow: none; }
+  body.touch #wrap { align-items: start; padding-top: 30px; }
 </style>
 </head>
 <body>
@@ -213,16 +211,11 @@
   const cvs = document.getElementById("game");
   const ctx = cvs.getContext("2d");
   function resize() {
-    const isTouchLayout = document.body.classList.contains("touch");
-    if (isTouchLayout) {
-      const reservedBottom = 290; // 240px D-pad + 24px bottom + breathing room
-      const reservedTop = 40;     // HUD
-      cvs.width = Math.max(280, window.innerWidth - 10);
-      cvs.height = Math.max(280, window.innerHeight - reservedTop - reservedBottom);
-    } else {
-      const size = Math.max(280, Math.floor(Math.min(window.innerWidth, window.innerHeight) - 20));
-      cvs.width = size; cvs.height = size;
-    }
+    const reservedBottom = document.body.classList.contains("touch") ? 200 : 0;
+    const availW = window.innerWidth - 20;
+    const availH = window.innerHeight - 20 - reservedBottom;
+    const size = Math.max(280, Math.floor(Math.min(availW, availH)));
+    cvs.width = size; cvs.height = size;
     if (state.phase === "play") render();
   }
   window.addEventListener("resize", resize);
@@ -485,8 +478,6 @@
       x, y, fx:x, fy:y, progress:0, target:null,
     }));
     state.queued = null;
-    // Camera starts on player, snapped (no lerp on first frame)
-    state.cam = { x: state.player.fx, y: state.player.fy };
     updateHUD();
   }
 
@@ -678,12 +669,6 @@
 
     updateHUD();
 
-    // Camera: lerp toward player position. Frame-rate-independent smoothing.
-    const lerpRate = 6.0; // higher = snappier follow
-    const t = 1 - Math.exp(-lerpRate * dt);
-    state.cam.x += (p.fx - state.cam.x) * t;
-    state.cam.y += (p.fy - state.cam.y) * t;
-
     // level complete?
     if (levelComplete()) {
       state.score += 100 + state.levelNum * 25;
@@ -699,43 +684,16 @@
     ctx.fillStyle = "#000";
     ctx.fillRect(0,0,W,H);
 
-    // Layout: two modes.
-    // - Desktop (fit): scale grid to canvas with padding, no scrolling.
-    // - Mobile (follow): fixed cell size, camera follows player, grid clamped to viewport.
-    const isTouchLayout = document.body.classList.contains("touch");
-    let cell, ox, oy;
+    // compute layout: fit grid in canvas with padding
+    const pad = 40;
+    const inner = Math.min(W, H) - pad*2;
+    const cell = inner / lvl.size;
+    const ox = (W - cell*lvl.size) / 2;
+    const oy = (H - cell*lvl.size) / 2;
 
-    if (isTouchLayout) {
-      // Fixed cell size for readable mobile play. Tuned so 5x5 fits a typical phone width.
-      cell = Math.max(60, Math.min(90, Math.floor(W / 5)));
-      const gridPxW = lvl.size * cell;
-      const gridPxH = lvl.size * cell;
-
-      if (gridPxW <= W) {
-        // Grid narrower than viewport — centre it, no horizontal scroll.
-        ox = (W - gridPxW) / 2;
-      } else {
-        // Camera follows player horizontally. Clamp so we never show empty space past the grid edge.
-        const camPx = state.cam.x * cell + cell/2;
-        const desiredOx = W/2 - camPx;
-        ox = Math.max(W - gridPxW, Math.min(0, desiredOx));
-      }
-      if (gridPxH <= H) {
-        oy = (H - gridPxH) / 2;
-      } else {
-        const camPy = state.cam.y * cell + cell/2;
-        const desiredOy = H/2 - camPy;
-        oy = Math.max(H - gridPxH, Math.min(0, desiredOy));
-      }
-    } else {
-      // Desktop: fit-to-canvas with padding (original behaviour)
-      const pad = 40;
-      const inner = Math.min(W, H) - pad*2;
-      cell = inner / lvl.size;
-      ox = (W - cell*lvl.size) / 2;
-      oy = (H - cell*lvl.size) / 2;
-    }
-
+    // dim outline of cells (so absent cells are simply not drawn)
+    // We don't draw cell outlines themselves — only EDGES are drawn (painted or unpainted).
+    // For each edge, draw a line segment.
     ctx.lineCap = "square";
 
     // First pass: unpainted edges (white)
@@ -756,6 +714,10 @@
       drawEdge(key, ox, oy, cell);
     }
     ctx.shadowBlur = 0;
+
+    // Junction dots (small) where two or more edges meet — keeps it crisp
+    // Only draw at painted junctions to feel like a trail head/tail.
+    // Skipped for simplicity.
 
     // Player — solid cyan dot, same shape as enemies
     const p = state.player;
