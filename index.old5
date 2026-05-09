@@ -640,27 +640,6 @@
     else if (keys["ArrowLeft"] || keys["KeyA"]) held = [-1,0];
     else if (keys["ArrowRight"] || keys["KeyD"]) held = [1,0];
 
-    // Finger-trace steering: if a touch target is set, work out the next step
-    // toward it and feed it into the queue/held system. Compute from the player's
-    // *upcoming* cell (the cell they're moving into) so turns happen at the right
-    // intersection and not one cell late.
-    if (state.touchTarget) {
-      const fromX = p.target ? p.target[0] : p.x;
-      const fromY = p.target ? p.target[1] : p.y;
-      if (fromX === state.touchTarget.x && fromY === state.touchTarget.y) {
-        // already heading to / standing on the target — no new direction
-      } else {
-        const step = stepToward(fromX, fromY, state.touchTarget.x, state.touchTarget.y,
-                                lvl.edges, lvl.size);
-        if (step) {
-          // Treat this as both held and queued — held keeps the player moving
-          // when they reach the target's row/column, queued takes turns at junctions.
-          held = step;
-          state.queued = step;
-        }
-      }
-    }
-
     // Queued direction persists indefinitely — taken at the next intersection
     // where it's a valid path. Cleared when consumed or when player presses
     // a different direction. (Pac-Man-style "next available turn" input.)
@@ -880,102 +859,8 @@
     document.getElementById("start-hint").textContent = "▸ tap to start ◂";
     document.getElementById("go-hint").textContent = "▸ tap to restart ◂";
     const k = document.getElementById("keys-hint");
-    k.innerHTML = "<div>Drag on the grid to lead the player</div><div>Or use the on-screen pad</div><div>Tap to start</div>";
+    k.innerHTML = "<div>Use the on-screen pad to move</div><div>Tap the screen to start</div>";
   }
-
-  // Finger-trace target: when set, the player auto-routes toward this grid cell.
-  // Cleared on touchend (player coasts in current direction afterward).
-  // The handler sits on the canvas; touches on the D-pad are handled by their own listeners.
-  state.touchTarget = null; // {x,y} in cell coordinates, or null
-  state.touchTargetId = null; // which finger is steering
-
-  // Convert a touch's clientX/clientY to a grid cell, accounting for canvas position
-  // and the camera offset on mobile.
-  function touchToCell(clientX, clientY) {
-    const rect = cvs.getBoundingClientRect();
-    // Canvas internal pixels may differ from CSS pixels — rescale.
-    const px = (clientX - rect.left) * (cvs.width / rect.width);
-    const py = (clientY - rect.top)  * (cvs.height / rect.height);
-    // Reconstruct the same layout the renderer uses.
-    const lvl = state.level;
-    if (!lvl) return null;
-    const W = cvs.width, H = cvs.height;
-    const isTouchLayout = document.body.classList.contains("touch");
-    let cell, ox, oy;
-    if (isTouchLayout) {
-      cell = Math.max(60, Math.min(90, Math.floor(W / 5)));
-      const gridPxW = lvl.size * cell;
-      const gridPxH = lvl.size * cell;
-      if (gridPxW <= W) ox = (W - gridPxW) / 2;
-      else {
-        const camPx = state.cam.x * cell + cell/2;
-        const desiredOx = W/2 - camPx;
-        ox = Math.max(W - gridPxW, Math.min(0, desiredOx));
-      }
-      if (gridPxH <= H) oy = (H - gridPxH) / 2;
-      else {
-        const camPy = state.cam.y * cell + cell/2;
-        const desiredOy = H/2 - camPy;
-        oy = Math.max(H - gridPxH, Math.min(0, desiredOy));
-      }
-    } else {
-      const pad = 40;
-      const inner = Math.min(W, H) - pad*2;
-      cell = inner / lvl.size;
-      ox = (W - cell*lvl.size) / 2;
-      oy = (H - cell*lvl.size) / 2;
-    }
-    const cx = Math.floor((px - ox) / cell);
-    const cy = Math.floor((py - oy) / cell);
-    if (cx < 0 || cy < 0 || cx >= lvl.size || cy >= lvl.size) return null;
-    if (!lvl.cells[cy][cx]) {
-      // Snap to nearest present cell within a small radius — handy for irregular shapes
-      let best = null, bestDist = Infinity;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const nx = cx+dx, ny = cy+dy;
-        if (nx<0||ny<0||nx>=lvl.size||ny>=lvl.size) continue;
-        if (!lvl.cells[ny][nx]) continue;
-        const d = (dx*dx + dy*dy);
-        if (d < bestDist) { bestDist = d; best = [nx, ny]; }
-      }
-      return best ? { x: best[0], y: best[1] } : null;
-    }
-    return { x: cx, y: cy };
-  }
-
-  // Touch handlers on canvas — only on mobile, and only during play
-  cvs.addEventListener("touchstart", (e) => {
-    if (state.phase !== "play") return;
-    e.preventDefault();
-    const t = e.changedTouches[0];
-    const cell = touchToCell(t.clientX, t.clientY);
-    if (cell) {
-      state.touchTarget = cell;
-      state.touchTargetId = t.identifier;
-    }
-  }, { passive: false });
-
-  cvs.addEventListener("touchmove", (e) => {
-    if (state.phase !== "play" || state.touchTargetId === null) return;
-    e.preventDefault();
-    for (const t of e.changedTouches) {
-      if (t.identifier !== state.touchTargetId) continue;
-      const cell = touchToCell(t.clientX, t.clientY);
-      if (cell) state.touchTarget = cell;
-    }
-  }, { passive: false });
-
-  function endTouch(e) {
-    if (state.touchTargetId === null) return;
-    for (const t of e.changedTouches) {
-      if (t.identifier === state.touchTargetId) {
-        state.touchTarget = null;
-        state.touchTargetId = null;
-      }
-    }
-  }
-  cvs.addEventListener("touchend", endTouch, { passive: false });
-  cvs.addEventListener("touchcancel", endTouch, { passive: false });
 
   // Map D-pad buttons to the same keys the game already reads.
   // Holding a button = held key. Release = key released.
