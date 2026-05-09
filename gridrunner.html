@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GRIDRUNNER</title>
+<style>
+  :root {
+    --bg: #000;
+    --fg: #fff;
+    --player: #29b6ff;
+    --enemy: #ff3b3b;
+    --dim: #555;
+  }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    overflow: hidden;
+    user-select: none;
+  }
+  #wrap {
+    position: fixed; inset: 0;
+    display: grid; place-items: center;
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    box-shadow: 0 0 60px rgba(41,182,255,0.05);
+  }
+  #hud {
+    position: fixed; top: 12px; left: 0; right: 0;
+    display: flex; justify-content: space-between;
+    padding: 0 18px;
+    font-size: 13px; letter-spacing: 0.18em;
+    pointer-events: none;
+    text-transform: uppercase;
+  }
+  #hud span { opacity: 0.85; }
+  #hud b { color: var(--player); font-weight: 600; }
+  .overlay {
+    position: fixed; inset: 0;
+    display: grid; place-items: center;
+    background: rgba(0,0,0,0.86);
+    backdrop-filter: blur(2px);
+    z-index: 10;
+  }
+  .panel {
+    text-align: center;
+    padding: 28px 36px;
+    border: 1px solid rgba(255,255,255,0.15);
+    min-width: 280px;
+  }
+  .panel h1 {
+    margin: 0 0 6px;
+    font-size: 28px;
+    letter-spacing: 0.4em;
+    font-weight: 600;
+  }
+  .panel h1 .accent { color: var(--player); }
+  .panel p {
+    margin: 6px 0;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+  .panel input {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255,255,255,0.3);
+    color: var(--fg);
+    font: inherit;
+    font-size: 14px;
+    text-align: center;
+    padding: 6px 4px;
+    width: 200px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    outline: none;
+  }
+  .panel input:focus { border-bottom-color: var(--player); }
+  .panel .keys {
+    margin-top: 18px;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    opacity: 0.55;
+    line-height: 1.9;
+  }
+  .panel .keys kbd {
+    display: inline-block;
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 1px 6px;
+    margin: 0 2px;
+    border-radius: 2px;
+    font-size: 10px;
+  }
+  .panel .high {
+    margin-top: 14px;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+  }
+  .panel .high b { color: var(--player); font-weight: 600; }
+  .blink { animation: blink 1.2s steps(2,end) infinite; }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <span>LVL <b id="hud-level">1</b></span>
+  <span>SCORE <b id="hud-score">0</b></span>
+  <span><b id="hud-fill">0%</b> COVERED</span>
+</div>
+
+<div id="wrap"><canvas id="game" width="720" height="720"></canvas></div>
+
+<div class="overlay" id="menu">
+  <div class="panel">
+    <h1>GRID<span class="accent">RUNNER</span></h1>
+    <p>Paint every line. Don't get caught.</p>
+    <p style="margin-top:18px;">Enter name</p>
+    <input id="name" maxlength="12" autocomplete="off">
+    <div class="high">HI <b id="hi-name">—</b> &nbsp; <b id="hi-score">0</b></div>
+    <div class="keys">
+      <div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — move</div>
+      <div><kbd>Space</kbd> — start &nbsp; <kbd>Esc</kbd> — quit to menu</div>
+    </div>
+    <p class="blink" style="margin-top:18px;">▸ press space ◂</p>
+  </div>
+</div>
+
+<div class="overlay hidden" id="gameover">
+  <div class="panel">
+    <h1 id="go-title">GAME OVER</h1>
+    <p id="go-sub">Caught on level 1</p>
+    <div class="high">SCORE <b id="go-score">0</b></div>
+    <div class="high" id="go-newhigh" style="display:none;color:var(--player);">NEW HIGH SCORE</div>
+    <p class="blink" style="margin-top:22px;">▸ press space ◂</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ------- storage -------
+  const KEY = "gridrunner.v1";
+  const load = () => {
+    try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
+    catch { return {}; }
+  };
+  const save = (o) => {
+    try { localStorage.setItem(KEY, JSON.stringify(o)); } catch {}
+  };
+  let store = load();
+  store.name = store.name || "";
+  store.hiScore = store.hiScore || 0;
+  store.hiName = store.hiName || "—";
+
+  // ------- canvas / sizing -------
+  const cvs = document.getElementById("game");
+  const ctx = cvs.getContext("2d");
+  function resize() {
+    const s = Math.min(window.innerWidth, window.innerHeight) - 40;
+    const size = Math.max(360, Math.floor(s));
+    cvs.width = size; cvs.height = size;
+    if (state.phase === "play") render();
+  }
+  window.addEventListener("resize", resize);
+
+  // ------- input -------
+  const keys = {};
+  const dirOf = (k) => {
+    if (k === "ArrowUp" || k === "KeyW") return [0,-1];
+    if (k === "ArrowDown" || k === "KeyS") return [0,1];
+    if (k === "ArrowLeft" || k === "KeyA") return [-1,0];
+    if (k === "ArrowRight" || k === "KeyD") return [1,0];
+    return null;
+  };
+  window.addEventListener("keydown", (e) => {
+    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","Space"].includes(e.key) || e.code === "Space") e.preventDefault();
+    keys[e.code] = true;
+    if (e.code === "Space") {
+      if (state.phase === "menu") startGame();
+      else if (state.phase === "gameover") { showMenu(); }
+    }
+    if (e.code === "Escape") {
+      if (state.phase === "play") showMenu();
+    }
+    const d = dirOf(e.code);
+    if (d && state.phase === "play") {
+      state.queued = d;
+      state.queuedAt = performance.now();
+    }
+  });
+  window.addEventListener("keyup", (e) => { keys[e.code] = false; });
+
+  // ------- level generation -------
+  // The grid is a graph of cells. Each cell has up to 4 edges.
+  // An "edge" is a wall segment between two cells (or between a cell and outside).
+  // We track which edges EXIST (open paths) and which are PAINTED.
+  // The level shape itself can be irregular (cells removed) at higher levels.
+
+  function makeLevel(n) {
+    // Difficulty curve
+    const size = Math.min(3 + Math.floor(n / 1.5), 9);  // 3..9 cells per side
+    const enemies = Math.min(Math.floor(n / 2), 4);     // 0..4 enemies
+    const gapChance = Math.min(0.05 + n * 0.025, 0.28); // walls inserted
+    const cellRemoveChance = n >= 3 ? Math.min((n-2) * 0.04, 0.18) : 0; // irregular shape
+    const playerSpeed = 4.0 + n * 0.25;                 // cells/sec
+    const enemySpeed = 2.4 + n * 0.30;
+
+    // Build cell grid; mark some cells as "absent" to make irregular shape
+    const cells = [];
+    for (let y = 0; y < size; y++) {
+      const row = [];
+      for (let x = 0; x < size; x++) row.push(true);
+      cells.push(row);
+    }
+    if (cellRemoveChance > 0) {
+      // remove cells from corners/edges only, and ensure connectivity
+      const candidates = [];
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        const edge = (x===0||y===0||x===size-1||y===size-1);
+        if (edge && Math.random() < cellRemoveChance) candidates.push([x,y]);
+      }
+      for (const [x,y] of candidates) {
+        cells[y][x] = false;
+        if (!isConnected(cells, size)) cells[y][x] = true;
+      }
+    }
+
+    // Build edges. An edge is between two adjacent present cells.
+    // Each edge is either OPEN (passable) or BLOCKED (wall - the gap in the user's diagram).
+    // Wait — re-reading the brief: gaps in the grid create dead ends. In the reference image,
+    // the WHITE LINES are paths; missing white lines are gaps. So:
+    // - present edges = passable corridors the player runs along
+    // - missing edges = "gaps that can't be crossed"
+    // We start with all adjacent edges present, then remove some to make dead ends.
+    // We must keep the graph connected.
+
+    const edges = new Map(); // key "x1,y1-x2,y2" canonical -> {painted:false}
+    const edgeKey = (x1,y1,x2,y2) => {
+      if (x2 < x1 || (x2===x1 && y2<y1)) [x1,y1,x2,y2] = [x2,y2,x1,y1];
+      return `${x1},${y1}-${x2},${y2}`;
+    };
+    const addEdge = (x1,y1,x2,y2) => edges.set(edgeKey(x1,y1,x2,y2), { painted: false });
+
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      if (!cells[y][x]) continue;
+      if (x+1 < size && cells[y][x+1]) addEdge(x,y,x+1,y);
+      if (y+1 < size && cells[y+1][x]) addEdge(x,y,x,y+1);
+    }
+
+    // Remove edges to introduce gaps, while keeping graph connected
+    const edgeList = [...edges.keys()];
+    shuffle(edgeList);
+    const targetRemovals = Math.floor(edges.size * gapChance);
+    let removed = 0;
+    for (const k of edgeList) {
+      if (removed >= targetRemovals) break;
+      const saved = edges.get(k);
+      edges.delete(k);
+      if (graphConnected(cells, edges, size)) removed++;
+      else edges.set(k, saved);
+    }
+
+    // Find a starting cell (top-left present cell)
+    let start = null;
+    outer: for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      if (cells[y][x]) { start = [x,y]; break outer; }
+    }
+
+    // Place enemies far from player
+    const enemyStarts = [];
+    const dists = bfsDistances(cells, edges, size, start);
+    const sortedCells = [];
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      if (cells[y][x] && dists[y][x] !== Infinity) sortedCells.push([x,y,dists[y][x]]);
+    }
+    sortedCells.sort((a,b) => b[2]-a[2]);
+    for (let i = 0; i < enemies && i < sortedCells.length; i++) {
+      enemyStarts.push([sortedCells[i][0], sortedCells[i][1]]);
+    }
+
+    return {
+      n, size, cells, edges,
+      start, enemyStarts,
+      playerSpeed, enemySpeed,
+    };
+  }
+
+  function shuffle(a) {
+    for (let i = a.length-1; i > 0; i--) {
+      const j = Math.floor(Math.random()*(i+1));
+      [a[i],a[j]] = [a[j],a[i]];
+    }
+    return a;
+  }
+
+  function isConnected(cells, size) {
+    let first = null;
+    for (let y = 0; y < size && !first; y++)
+      for (let x = 0; x < size && !first; x++)
+        if (cells[y][x]) first = [x,y];
+    if (!first) return false;
+    const seen = Array.from({length:size}, () => Array(size).fill(false));
+    const q = [first]; seen[first[1]][first[0]] = true;
+    let count = 1, total = 0;
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (cells[y][x]) total++;
+    while (q.length) {
+      const [x,y] = q.shift();
+      for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const nx=x+dx, ny=y+dy;
+        if (nx<0||ny<0||nx>=size||ny>=size) continue;
+        if (cells[ny][nx] && !seen[ny][nx]) { seen[ny][nx]=true; q.push([nx,ny]); count++; }
+      }
+    }
+    return count === total;
+  }
+
+  function neighborsOf(x, y, edges, size) {
+    const ns = [];
+    const tries = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dx,dy] of tries) {
+      const nx=x+dx, ny=y+dy;
+      if (nx<0||ny<0||nx>=size||ny>=size) continue;
+      const k = (nx<x||ny<y) ? `${nx},${ny}-${x},${y}` : `${x},${y}-${nx},${ny}`;
+      if (edges.has(k)) ns.push([nx,ny]);
+    }
+    return ns;
+  }
+
+  function graphConnected(cells, edges, size) {
+    let first = null;
+    for (let y = 0; y < size && !first; y++)
+      for (let x = 0; x < size && !first; x++)
+        if (cells[y][x]) first = [x,y];
+    if (!first) return false;
+    const seen = Array.from({length:size}, () => Array(size).fill(false));
+    const q = [first]; seen[first[1]][first[0]] = true;
+    let count = 1, total = 0;
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (cells[y][x]) total++;
+    while (q.length) {
+      const [x,y] = q.shift();
+      for (const [nx,ny] of neighborsOf(x,y,edges,size)) {
+        if (!seen[ny][nx]) { seen[ny][nx]=true; q.push([nx,ny]); count++; }
+      }
+    }
+    return count === total;
+  }
+
+  function bfsDistances(cells, edges, size, start) {
+    const d = Array.from({length:size}, () => Array(size).fill(Infinity));
+    d[start[1]][start[0]] = 0;
+    const q = [start];
+    while (q.length) {
+      const [x,y] = q.shift();
+      for (const [nx,ny] of neighborsOf(x,y,edges,size)) {
+        if (d[ny][nx] === Infinity) { d[ny][nx] = d[y][x]+1; q.push([nx,ny]); }
+      }
+    }
+    return d;
+  }
+
+  // BFS to find next step from (sx,sy) toward (tx,ty)
+  function stepToward(sx, sy, tx, ty, edges, size) {
+    if (sx===tx && sy===ty) return null;
+    const prev = Array.from({length:size}, () => Array(size).fill(null));
+    const seen = Array.from({length:size}, () => Array(size).fill(false));
+    seen[sy][sx] = true;
+    const q = [[sx,sy]];
+    while (q.length) {
+      const [x,y] = q.shift();
+      if (x===tx && y===ty) {
+        // walk back
+        let cx=x, cy=y;
+        while (true) {
+          const p = prev[cy][cx];
+          if (!p) return null;
+          if (p[0]===sx && p[1]===sy) return [cx-sx, cy-sy];
+          cx=p[0]; cy=p[1];
+        }
+      }
+      for (const [nx,ny] of neighborsOf(x,y,edges,size)) {
+        if (!seen[ny][nx]) { seen[ny][nx]=true; prev[ny][nx]=[x,y]; q.push([nx,ny]); }
+      }
+    }
+    return null;
+  }
+
+  // ------- game state -------
+  const state = {
+    phase: "menu",        // menu | play | gameover
+    level: null,          // level data
+    levelNum: 1,
+    score: 0,
+    player: null,         // {x,y,fx,fy,dir,moving}
+    enemies: [],
+    queued: null,         // queued direction
+    lastT: 0,
+    enemyThinkTimer: 0,
+  };
+
+  function startGame() {
+    const nameEl = document.getElementById("name");
+    const nm = (nameEl.value || store.name || "PLAYER").trim().toUpperCase().slice(0,12) || "PLAYER";
+    store.name = nm; save(store);
+    state.levelNum = 1;
+    state.score = 0;
+    beginLevel(state.levelNum);
+    document.getElementById("menu").classList.add("hidden");
+    document.getElementById("gameover").classList.add("hidden");
+    state.phase = "play";
+    resize();
+    state.lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function beginLevel(n) {
+    state.level = makeLevel(n);
+    state.player = {
+      x: state.level.start[0], y: state.level.start[1],
+      fx: state.level.start[0], fy: state.level.start[1],
+      dir: [0,0],
+      progress: 0, // 0..1 along current move
+      target: null,
+    };
+    state.enemies = state.level.enemyStarts.map(([x,y]) => ({
+      x, y, fx:x, fy:y, progress:0, target:null,
+    }));
+    state.queued = null;
+    updateHUD();
+  }
+
+  function showMenu() {
+    state.phase = "menu";
+    document.getElementById("menu").classList.remove("hidden");
+    document.getElementById("gameover").classList.add("hidden");
+    refreshMenu();
+  }
+
+  function gameOver(won) {
+    state.phase = "gameover";
+    const isHigh = state.score > store.hiScore;
+    if (isHigh) {
+      store.hiScore = state.score;
+      store.hiName = store.name;
+      save(store);
+    }
+    document.getElementById("go-title").textContent = won ? "YOU WIN" : "CAUGHT";
+    document.getElementById("go-sub").textContent = won
+      ? `Cleared level ${state.levelNum}`
+      : `Caught on level ${state.levelNum}`;
+    document.getElementById("go-score").textContent = state.score;
+    document.getElementById("go-newhigh").style.display = isHigh ? "block" : "none";
+    document.getElementById("gameover").classList.remove("hidden");
+  }
+
+  function refreshMenu() {
+    document.getElementById("name").value = store.name || "";
+    document.getElementById("hi-name").textContent = store.hiName || "—";
+    document.getElementById("hi-score").textContent = store.hiScore || 0;
+  }
+
+  function updateHUD() {
+    document.getElementById("hud-level").textContent = state.levelNum;
+    document.getElementById("hud-score").textContent = state.score;
+    let total = 0, painted = 0;
+    for (const e of state.level.edges.values()) { total++; if (e.painted) painted++; }
+    const pct = total ? Math.floor(painted * 100 / total) : 0;
+    document.getElementById("hud-fill").textContent = pct + "%";
+  }
+
+  function levelComplete() {
+    for (const e of state.level.edges.values()) if (!e.painted) return false;
+    return true;
+  }
+
+  // ------- movement -------
+  function tryStartMove(actor, dir, edges, size) {
+    if (!dir || (dir[0]===0 && dir[1]===0)) return false;
+    const nx = actor.x + dir[0], ny = actor.y + dir[1];
+    if (nx<0||ny<0||nx>=size||ny>=size) return false;
+    const k = (nx<actor.x||ny<actor.y) ? `${nx},${ny}-${actor.x},${actor.y}` : `${actor.x},${actor.y}-${nx},${ny}`;
+    if (!edges.has(k)) return false;
+    actor.target = [nx,ny];
+    actor.progress = 0;
+    actor.dir = dir;
+    return true;
+  }
+
+  function tickActor(actor, speed, dt) {
+    if (!actor.target) return false;
+    actor.progress += speed * dt;
+    if (actor.progress >= 1) {
+      actor.x = actor.target[0];
+      actor.y = actor.target[1];
+      actor.fx = actor.x; actor.fy = actor.y;
+      actor.target = null;
+      actor.progress = 0;
+      return true; // arrived
+    } else {
+      actor.fx = actor.x + actor.dir[0] * actor.progress;
+      actor.fy = actor.y + actor.dir[1] * actor.progress;
+      return false;
+    }
+  }
+
+  // Paint edge between (x1,y1)-(x2,y2). Returns true if newly painted.
+  function paintEdge(x1,y1,x2,y2) {
+    const k = (x2<x1||(x2===x1&&y2<y1)) ? `${x2},${y2}-${x1},${y1}` : `${x1},${y1}-${x2},${y2}`;
+    const e = state.level.edges.get(k);
+    if (!e) return false;
+    if (!e.painted) { e.painted = true; return true; }
+    return false;
+  }
+
+  // ------- main loop -------
+  function loop(t) {
+    if (state.phase !== "play") return;
+    const dt = Math.min(0.05, (t - state.lastT) / 1000);
+    state.lastT = t;
+
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    const lvl = state.level;
+    const p = state.player;
+    const now = performance.now();
+
+    // continuous input: held direction (used as the "default" travel)
+    let held = null;
+    if (keys["ArrowUp"] || keys["KeyW"]) held = [0,-1];
+    else if (keys["ArrowDown"] || keys["KeyS"]) held = [0,1];
+    else if (keys["ArrowLeft"] || keys["KeyA"]) held = [-1,0];
+    else if (keys["ArrowRight"] || keys["KeyD"]) held = [1,0];
+
+    // Buffer: a queued direction is valid if pressed within the last 250ms.
+    // This lets the player pre-press a turn before reaching the intersection.
+    const BUFFER_MS = 250;
+    let buffered = null;
+    if (state.queued && state.queuedAt && now - state.queuedAt < BUFFER_MS) {
+      buffered = state.queued;
+    } else {
+      state.queued = null;
+    }
+
+    // Mid-segment: try to honour a buffered REVERSE (180°) immediately so
+    // backtracking feels instant, but only on the same line.
+    if (p.target && buffered) {
+      const reversed = buffered[0] === -p.dir[0] && buffered[1] === -p.dir[1];
+      if (reversed) {
+        // swap target and traverse backwards
+        const oldTarget = p.target;
+        p.target = [p.x, p.y];
+        p.x = oldTarget[0]; p.y = oldTarget[1];
+        p.dir = buffered;
+        p.progress = 1 - p.progress;
+        state.queued = null;
+      }
+    }
+
+    if (!p.target) {
+      // At an intersection: pick best direction.
+      // Priority: buffered turn > held key > continue same direction.
+      const tries = [buffered, held, p.dir].filter(Boolean);
+      for (const d of tries) {
+        if (tryStartMove(p, d, lvl.edges, lvl.size)) {
+          if (buffered && d === buffered) state.queued = null;
+          break;
+        }
+      }
+    }
+
+    if (p.target) {
+      const before = [p.x, p.y];
+      const arrived = tickActor(p, lvl.playerSpeed, dt);
+      if (arrived) {
+        // paint the edge we just traversed
+        if (paintEdge(before[0], before[1], p.x, p.y)) {
+          state.score += 10;
+        }
+        // Pick next move at this junction.
+        // Priority: buffered turn > held key > continue same direction.
+        const tries = [buffered, held, p.dir].filter(Boolean);
+        for (const d of tries) {
+          if (tryStartMove(p, d, lvl.edges, lvl.size)) {
+            if (buffered && d === buffered) state.queued = null;
+            break;
+          }
+        }
+      }
+    }
+
+    // enemies
+    state.enemyThinkTimer += dt;
+    for (const en of state.enemies) {
+      if (!en.target) {
+        // pick a direction toward player
+        const step = stepToward(en.x, en.y, p.x, p.y, lvl.edges, lvl.size);
+        if (step) {
+          tryStartMove(en, step, lvl.edges, lvl.size);
+        } else {
+          // wander: any open neighbor
+          const ns = neighborsOf(en.x, en.y, lvl.edges, lvl.size);
+          if (ns.length) {
+            const [nx,ny] = ns[Math.floor(Math.random()*ns.length)];
+            tryStartMove(en, [nx-en.x, ny-en.y], lvl.edges, lvl.size);
+          }
+        }
+      }
+      tickActor(en, lvl.enemySpeed, dt);
+    }
+
+    // collision: distance between player and any enemy in cell-space
+    for (const en of state.enemies) {
+      const dx = en.fx - p.fx, dy = en.fy - p.fy;
+      if (dx*dx + dy*dy < 0.20*0.20) {
+        gameOver(false);
+        return;
+      }
+    }
+
+    updateHUD();
+
+    // level complete?
+    if (levelComplete()) {
+      state.score += 100 + state.levelNum * 25;
+      state.levelNum++;
+      beginLevel(state.levelNum);
+    }
+  }
+
+  // ------- rendering -------
+  function render() {
+    const lvl = state.level;
+    const W = cvs.width, H = cvs.height;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0,0,W,H);
+
+    // compute layout: fit grid in canvas with padding
+    const pad = 40;
+    const inner = Math.min(W, H) - pad*2;
+    const cell = inner / lvl.size;
+    const ox = (W - cell*lvl.size) / 2;
+    const oy = (H - cell*lvl.size) / 2;
+
+    // dim outline of cells (so absent cells are simply not drawn)
+    // We don't draw cell outlines themselves — only EDGES are drawn (painted or unpainted).
+    // For each edge, draw a line segment.
+    ctx.lineCap = "square";
+
+    // First pass: unpainted edges (white)
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = Math.max(2, cell * 0.04);
+    for (const [key, e] of lvl.edges) {
+      if (e.painted) continue;
+      drawEdge(key, ox, oy, cell);
+    }
+
+    // Second pass: painted edges (player color, with subtle glow)
+    ctx.strokeStyle = "#29b6ff";
+    ctx.shadowColor = "#29b6ff";
+    ctx.shadowBlur = Math.max(4, cell * 0.18);
+    ctx.lineWidth = Math.max(2.5, cell * 0.05);
+    for (const [key, e] of lvl.edges) {
+      if (!e.painted) continue;
+      drawEdge(key, ox, oy, cell);
+    }
+    ctx.shadowBlur = 0;
+
+    // Junction dots (small) where two or more edges meet — keeps it crisp
+    // Only draw at painted junctions to feel like a trail head/tail.
+    // Skipped for simplicity.
+
+    // Player — solid cyan dot, same shape as enemies
+    const p = state.player;
+    const pcx = ox + p.fx * cell + cell/2;
+    const pcy = oy + p.fy * cell + cell/2;
+    ctx.fillStyle = "#29b6ff";
+    ctx.shadowColor = "#29b6ff";
+    ctx.shadowBlur = Math.max(8, cell * 0.28);
+    ctx.beginPath();
+    ctx.arc(pcx, pcy, cell*0.10, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Enemies — solid red dots
+    for (const en of state.enemies) {
+      const ecx = ox + en.fx * cell + cell/2;
+      const ecy = oy + en.fy * cell + cell/2;
+      ctx.fillStyle = "#ff3b3b";
+      ctx.shadowColor = "#ff3b3b";
+      ctx.shadowBlur = Math.max(6, cell * 0.22);
+      ctx.beginPath();
+      ctx.arc(ecx, ecy, cell*0.09, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  function drawEdge(key, ox, oy, cell) {
+    const [a,b] = key.split("-");
+    const [x1,y1] = a.split(",").map(Number);
+    const [x2,y2] = b.split(",").map(Number);
+    // Edge is between cell (x1,y1) and (x2,y2). It's a line segment along their shared border.
+    // Convention: each cell's "lines" are on its top and left + outer right/bottom.
+    // We draw the edge as the line connecting the two cell CENTERS' shared border.
+    // Simpler: draw a line through the two cell centers along the shared axis,
+    // but matching the screenshot, the lines are the GRID LINES themselves.
+    // So: edge between two horizontally-adjacent cells is a VERTICAL line at their shared border.
+    // Wait — re-reading the brief once more. The grid lines are paths. Player travels along
+    // those lines. The edge between cell A and cell B is the corridor connecting them, drawn
+    // as a line from center(A) to center(B). That matches the top-down player movement and
+    // the painted-trail mechanic. Going with this.
+    const cx1 = ox + x1*cell + cell/2;
+    const cy1 = oy + y1*cell + cell/2;
+    const cx2 = ox + x2*cell + cell/2;
+    const cy2 = oy + y2*cell + cell/2;
+    ctx.beginPath();
+    ctx.moveTo(cx1, cy1);
+    ctx.lineTo(cx2, cy2);
+    ctx.stroke();
+  }
+
+  // ------- init -------
+  refreshMenu();
+  // Auto-focus the name field on load
+  setTimeout(() => document.getElementById("name").focus(), 100);
+  // Don't capture space when typing in the name field
+  document.getElementById("name").addEventListener("keydown", (e) => {
+    if (e.code === "Space") e.stopPropagation();
+  });
+})();
+</script>
+</body>
+</html>
