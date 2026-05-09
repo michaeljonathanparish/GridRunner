@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>GRIDRUNNER</title>
 <style>
   :root {
@@ -18,9 +18,7 @@
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     overflow: hidden;
     user-select: none;
-    overscroll-behavior: none;
   }
-  canvas, #dpad { touch-action: none; }
   #wrap {
     position: fixed; inset: 0;
     display: grid; place-items: center;
@@ -106,48 +104,6 @@
   .blink { animation: blink 1.2s steps(2,end) infinite; }
   @keyframes blink { 50% { opacity: 0.25; } }
   .hidden { display: none !important; }
-
-  /* On-screen D-pad for touch devices. Hidden by default; shown when body has .touch class. */
-  #dpad {
-    position: fixed;
-    right: 18px; bottom: 18px;
-    width: 168px; height: 168px;
-    display: none;
-    z-index: 5;
-    touch-action: none;
-    -webkit-user-select: none;
-    user-select: none;
-  }
-  body.touch #dpad { display: block; }
-  body.touch #hud { font-size: 11px; padding: 0 12px; }
-  #dpad .btn {
-    position: absolute;
-    width: 56px; height: 56px;
-    display: grid; place-items: center;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.25);
-    border-radius: 8px;
-    color: var(--fg);
-    font-size: 22px;
-    line-height: 1;
-    -webkit-tap-highlight-color: transparent;
-  }
-  #dpad .btn.active {
-    background: rgba(41,182,255,0.25);
-    border-color: var(--player);
-    color: var(--player);
-  }
-  #dpad .up    { top: 0;       left: 56px; }
-  #dpad .down  { bottom: 0;    left: 56px; }
-  #dpad .left  { top: 56px;    left: 0; }
-  #dpad .right { top: 56px;    right: 0; }
-
-  /* Touch overlays: bigger tap targets, scrollable if keyboard appears */
-  body.touch .panel { padding: 22px 24px; min-width: 0; max-width: 86vw; }
-  body.touch .panel h1 { font-size: 22px; letter-spacing: 0.32em; }
-  body.touch .panel input { width: 70vw; max-width: 240px; font-size: 16px; }
-  body.touch .overlay { align-items: start; padding-top: 8vh; }
-  body.touch #wrap { align-items: start; padding-top: 30px; }
 </style>
 </head>
 <body>
@@ -166,11 +122,11 @@
     <p style="margin-top:18px;">Enter name</p>
     <input id="name" maxlength="12" autocomplete="off">
     <div class="high">HI <b id="hi-name">—</b> &nbsp; <b id="hi-score">0</b></div>
-    <div class="keys" id="keys-hint">
+    <div class="keys">
       <div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — move</div>
-      <div><kbd>Space</kbd> — start</div>
+      <div><kbd>Space</kbd> — start &nbsp; <kbd>Esc</kbd> — quit to menu</div>
     </div>
-    <p class="blink" id="start-hint" style="margin-top:18px;">▸ press space ◂</p>
+    <p class="blink" style="margin-top:18px;">▸ press space ◂</p>
   </div>
 </div>
 
@@ -180,15 +136,8 @@
     <p id="go-sub">Caught on level 1</p>
     <div class="high">SCORE <b id="go-score">0</b></div>
     <div class="high" id="go-newhigh" style="display:none;color:var(--player);">NEW HIGH SCORE</div>
-    <p class="blink" id="go-hint" style="margin-top:22px;">▸ press space ◂</p>
+    <p class="blink" style="margin-top:22px;">▸ press space ◂</p>
   </div>
-</div>
-
-<div id="dpad" aria-hidden="true">
-  <div class="btn up"    data-dir="up">▲</div>
-  <div class="btn left"  data-dir="left">◀</div>
-  <div class="btn right" data-dir="right">▶</div>
-  <div class="btn down"  data-dir="down">▼</div>
 </div>
 
 <script>
@@ -211,10 +160,8 @@
   const cvs = document.getElementById("game");
   const ctx = cvs.getContext("2d");
   function resize() {
-    const reservedBottom = document.body.classList.contains("touch") ? 200 : 0;
-    const availW = window.innerWidth - 20;
-    const availH = window.innerHeight - 20 - reservedBottom;
-    const size = Math.max(280, Math.floor(Math.min(availW, availH)));
+    const s = Math.min(window.innerWidth, window.innerHeight) - 40;
+    const size = Math.max(360, Math.floor(s));
     cvs.width = size; cvs.height = size;
     if (state.phase === "play") render();
   }
@@ -235,6 +182,9 @@
     if (e.code === "Space") {
       if (state.phase === "menu") startGame();
       else if (state.phase === "gameover") { showMenu(); }
+    }
+    if (e.code === "Escape") {
+      if (state.phase === "play") showMenu();
     }
     const d = dirOf(e.code);
     if (d && state.phase === "play") {
@@ -776,72 +726,6 @@
     ctx.stroke();
   }
 
-  // ------- touch / mobile -------
-  const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
-  if (isTouch) {
-    document.body.classList.add("touch");
-    document.getElementById("start-hint").textContent = "▸ tap to start ◂";
-    document.getElementById("go-hint").textContent = "▸ tap to restart ◂";
-    const k = document.getElementById("keys-hint");
-    k.innerHTML = "<div>Use the on-screen pad to move</div><div>Tap the screen to start</div>";
-  }
-
-  // Map D-pad buttons to the same keys the game already reads.
-  // Holding a button = held key. Release = key released.
-  const dpadMap = {
-    up:    "ArrowUp",
-    down:  "ArrowDown",
-    left:  "ArrowLeft",
-    right: "ArrowRight",
-  };
-  const activeTouches = {}; // touchId -> dir
-  function pressDir(dir, btnEl) {
-    const code = dpadMap[dir];
-    if (!code) return;
-    keys[code] = true;
-    if (state.phase === "play") {
-      const d = dirOf(code);
-      if (d) { state.queued = d; state.queuedAt = performance.now(); }
-    }
-    if (btnEl) btnEl.classList.add("active");
-  }
-  function releaseDir(dir, btnEl) {
-    const code = dpadMap[dir];
-    if (!code) return;
-    keys[code] = false;
-    if (btnEl) btnEl.classList.remove("active");
-  }
-  document.querySelectorAll("#dpad .btn").forEach((btn) => {
-    const dir = btn.dataset.dir;
-    btn.addEventListener("touchstart", (e) => {
-      e.preventDefault();
-      for (const t of e.changedTouches) activeTouches[t.identifier] = { dir, btn };
-      pressDir(dir, btn);
-    }, { passive: false });
-    const endHandler = (e) => {
-      e.preventDefault();
-      for (const t of e.changedTouches) {
-        const rec = activeTouches[t.identifier];
-        if (rec) { releaseDir(rec.dir, rec.btn); delete activeTouches[t.identifier]; }
-      }
-    };
-    btn.addEventListener("touchend", endHandler, { passive: false });
-    btn.addEventListener("touchcancel", endHandler, { passive: false });
-    // Mouse fallback for desktop testing
-    btn.addEventListener("mousedown", (e) => { e.preventDefault(); pressDir(dir, btn); });
-    btn.addEventListener("mouseup",   (e) => { e.preventDefault(); releaseDir(dir, btn); });
-    btn.addEventListener("mouseleave",(e) => { releaseDir(dir, btn); });
-  });
-
-  // Tap on menu/gameover overlay to start (ignore taps on the input field)
-  function overlayTap(e) {
-    if (e.target.tagName === "INPUT") return;
-    if (state.phase === "menu") startGame();
-    else if (state.phase === "gameover") showMenu();
-  }
-  document.getElementById("menu").addEventListener("click", overlayTap);
-  document.getElementById("gameover").addEventListener("click", overlayTap);
-
   // ------- init -------
   refreshMenu();
   // Auto-focus the name field on load
@@ -854,3 +738,4 @@
 </script>
 </body>
 </html>
+// update
