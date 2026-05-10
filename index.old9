@@ -115,43 +115,80 @@
   @keyframes blink { 50% { opacity: 0.25; } }
   .hidden { display: none !important; }
 
-  /* On-screen D-pad for touch devices: discrete buttons, centred at the bottom. */
-  #dpad {
+  /* Virtual joystick zone for touch devices. The whole shaded area is the input
+     surface; an inner indicator shows the currently-registered direction. */
+  #stick {
     position: fixed;
-    left: 50%; bottom: 28px;
-    transform: translateX(-50%);
-    width: 252px; height: 252px; /* 84 * 3 grid */
+    left: 0; right: 0; bottom: 0;
+    height: 280px;
     display: none;
     z-index: 5;
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
+    background: rgba(255,255,255,0.025);
+    border-top: 1px solid rgba(255,255,255,0.08);
   }
-  body.touch #dpad { display: block; }
+  body.touch #stick { display: block; }
   body.touch #hud { font-size: 13px; padding: 0 14px; }
   body.touch #hud .mid { font-size: 14px; }
   body.touch #hud .mid b { font-size: 18px; }
-  #dpad .btn {
+  /* Centre marker */
+  #stick .base {
     position: absolute;
-    width: 84px; height: 84px;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 180px; height: 180px;
+    border: 1px dashed rgba(255,255,255,0.15);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  /* Direction indicators around the dial */
+  #stick .arrow {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 40px; height: 40px;
+    margin: -20px 0 0 -20px;
     display: grid; place-items: center;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.25);
-    border-radius: 14px;
-    color: var(--fg);
-    font-size: 32px;
+    color: rgba(255,255,255,0.25);
+    font-size: 22px;
     line-height: 1;
-    -webkit-tap-highlight-color: transparent;
+    pointer-events: none;
+    transition: color 0.08s ease, text-shadow 0.08s ease;
   }
-  #dpad .btn.active {
-    background: rgba(41,182,255,0.25);
-    border-color: var(--player);
+  #stick .arrow.up    { transform: translate(0, -90px); }
+  #stick .arrow.down  { transform: translate(0,  90px); }
+  #stick .arrow.left  { transform: translate(-90px, 0); }
+  #stick .arrow.right { transform: translate( 90px, 0); }
+  #stick .arrow.active {
     color: var(--player);
+    text-shadow: 0 0 12px rgba(41,182,255,0.7);
   }
-  #dpad .up    { top: 0;   left: 84px; }
-  #dpad .down  { bottom: 0; left: 84px; }
-  #dpad .left  { top: 84px; left: 0; }
-  #dpad .right { top: 84px; right: 0; }
+  /* Thumb dot — shows current finger position relative to start */
+  #stick .thumb {
+    position: absolute;
+    width: 36px; height: 36px;
+    margin: -18px 0 0 -18px;
+    border-radius: 50%;
+    background: rgba(41,182,255,0.18);
+    border: 1px solid var(--player);
+    box-shadow: 0 0 18px rgba(41,182,255,0.4);
+    pointer-events: none;
+    display: none;
+  }
+  #stick.active .thumb { display: block; }
+  /* Hint text when no finger down */
+  #stick .hint {
+    position: absolute;
+    left: 50%; bottom: 14px;
+    transform: translateX(-50%);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: rgba(255,255,255,0.35);
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+  #stick.active .hint { opacity: 0; }
 
   /* Touch overlays: bigger tap targets, scrollable if keyboard appears */
   body.touch .panel { padding: 22px 24px; min-width: 0; max-width: 86vw; }
@@ -196,11 +233,14 @@
   </div>
 </div>
 
-<div id="dpad" aria-hidden="true">
-  <div class="btn up"    data-dir="up">▲</div>
-  <div class="btn left"  data-dir="left">◀</div>
-  <div class="btn right" data-dir="right">▶</div>
-  <div class="btn down"  data-dir="down">▼</div>
+<div id="stick" aria-hidden="true">
+  <div class="base"></div>
+  <div class="arrow up">▲</div>
+  <div class="arrow down">▼</div>
+  <div class="arrow left">◀</div>
+  <div class="arrow right">▶</div>
+  <div class="thumb" id="stick-thumb"></div>
+  <div class="hint">drag to steer</div>
 </div>
 
 <script>
@@ -238,8 +278,8 @@
   function resize() {
     const isTouchLayout = document.body.classList.contains("touch");
     if (isTouchLayout) {
-      // D-pad is 252px tall + 28px bottom margin. Add breathing room.
-      const reservedBottom = 300;
+      // Joystick zone is 280px at the bottom.
+      const reservedBottom = 280;
       const reservedTop = 40;     // HUD
       cvs.width = Math.max(280, window.innerWidth - 10);
       cvs.height = Math.max(280, window.innerHeight - reservedTop - reservedBottom);
@@ -877,56 +917,160 @@
     document.getElementById("start-hint").textContent = "▸ tap to start ◂";
     document.getElementById("go-hint").textContent = "▸ tap to restart ◂";
     const k = document.getElementById("keys-hint");
-    k.innerHTML = "<div>Use the on-screen pad to move</div><div>Tap anywhere to start</div>";
+    k.innerHTML = "<div>Drag in the bottom panel to steer</div><div>Tap anywhere to start</div>";
   }
 
-  // D-pad buttons map to the same keys the keyboard handler uses, so the
-  // existing held-direction + persistent-queue logic in update() handles
-  // everything. Touchstart presses, touchend releases. Multi-finger aware.
-  const dpadMap = {
-    up:    "ArrowUp",
-    down:  "ArrowDown",
-    left:  "ArrowLeft",
-    right: "ArrowRight",
+  // Virtual joystick on the bottom zone.
+  // Behaviour: touch down anywhere in the zone establishes an "origin". Drag from
+  // there in any direction; the dominant axis (whichever displacement is larger)
+  // becomes the active direction. Below a small dead zone, no direction is sent.
+  // Lifting the finger clears the input — player coasts until next touch.
+  const stickEl = document.getElementById("stick");
+  const thumbEl = document.getElementById("stick-thumb");
+  const arrowEls = {
+    "0,-1": stickEl.querySelector(".arrow.up"),
+    "0,1":  stickEl.querySelector(".arrow.down"),
+    "-1,0": stickEl.querySelector(".arrow.left"),
+    "1,0":  stickEl.querySelector(".arrow.right"),
   };
-  const activeTouches = {}; // touchId -> {dir, btn}
-  function pressDir(dir, btnEl) {
-    const code = dpadMap[dir];
-    if (!code) return;
-    keys[code] = true;
-    if (state.phase === "play") {
-      const d = dirOf(code);
-      if (d) state.queued = d;
+  const stickState = {
+    touchId: null,
+    originX: 0, originY: 0,
+    dir: null,           // current 4-way direction [dx,dy] or null
+  };
+  const DEAD_ZONE = 8;        // px before any direction registers from neutral
+  const SWITCH_THRESHOLD = 10; // px of perpendicular motion to switch active direction
+  const MAX_RADIUS = 70; // visual cap for the thumb dot
+
+  function setStickDir(dir) {
+    if (stickState.dir &&
+        (!dir || stickState.dir[0] !== dir[0] || stickState.dir[1] !== dir[1])) {
+      // Clear old held key
+      const oldCode = dirToKeyCode(stickState.dir);
+      if (oldCode) keys[oldCode] = false;
+      const oldArrow = arrowEls[stickState.dir.join(",")];
+      if (oldArrow) oldArrow.classList.remove("active");
     }
-    if (btnEl) btnEl.classList.add("active");
+    stickState.dir = dir;
+    if (dir) {
+      const code = dirToKeyCode(dir);
+      if (code) keys[code] = true;
+      if (state.phase === "play") state.queued = dir;
+      const arrow = arrowEls[dir.join(",")];
+      if (arrow) arrow.classList.add("active");
+    }
   }
-  function releaseDir(dir, btnEl) {
-    const code = dpadMap[dir];
-    if (!code) return;
-    keys[code] = false;
-    if (btnEl) btnEl.classList.remove("active");
+  function dirToKeyCode(d) {
+    if (d[0] === 0 && d[1] === -1) return "ArrowUp";
+    if (d[0] === 0 && d[1] ===  1) return "ArrowDown";
+    if (d[0] === -1 && d[1] === 0) return "ArrowLeft";
+    if (d[0] ===  1 && d[1] === 0) return "ArrowRight";
+    return null;
   }
-  document.querySelectorAll("#dpad .btn").forEach((btn) => {
-    const dir = btn.dataset.dir;
-    btn.addEventListener("touchstart", (e) => {
-      e.preventDefault();
-      for (const t of e.changedTouches) activeTouches[t.identifier] = { dir, btn };
-      pressDir(dir, btn);
-    }, { passive: false });
-    const endHandler = (e) => {
-      e.preventDefault();
-      for (const t of e.changedTouches) {
-        const rec = activeTouches[t.identifier];
-        if (rec) { releaseDir(rec.dir, rec.btn); delete activeTouches[t.identifier]; }
+
+  function updateThumb(x, y) {
+    // Position the thumb dot relative to the stick element.
+    // Cap the visual displacement at MAX_RADIUS for a clean look.
+    const rect = stickEl.getBoundingClientRect();
+    let dx = x - rect.left - rect.width/2;
+    let dy = y - rect.top - rect.height/2;
+    const dist = Math.hypot(dx, dy);
+    if (dist > MAX_RADIUS) {
+      dx = dx * MAX_RADIUS / dist;
+      dy = dy * MAX_RADIUS / dist;
+    }
+    thumbEl.style.left = (rect.width/2 + dx) + "px";
+    thumbEl.style.top  = (rect.height/2 + dy) + "px";
+  }
+
+  // Direction-change physics:
+  //  - From neutral, displacement must exceed DEAD_ZONE before registering.
+  //  - Once active, switching to a perpendicular direction only needs
+  //    SWITCH_THRESHOLD pixels of motion in the new axis. The origin's
+  //    perpendicular component is then snapped to the current touch position
+  //    so further switches are equally cheap.
+  //  - Going BACK to the same axis after a perpendicular switch also takes
+  //    only SWITCH_THRESHOLD pixels.
+  //  - The active direction stays "locked" against tiny jitter on the parallel
+  //    axis (no need to re-cross threshold to keep going).
+  function processTouch(clientX, clientY) {
+    const dx = clientX - stickState.originX;
+    const dy = clientY - stickState.originY;
+    const dist = Math.hypot(dx, dy);
+    const cur = stickState.dir;
+
+    if (!cur) {
+      // From neutral: need to clear the dead zone to register anything.
+      if (dist < DEAD_ZONE) {
+        setStickDir(null);
+      } else if (Math.abs(dx) > Math.abs(dy)) {
+        setStickDir(dx > 0 ? [1, 0] : [-1, 0]);
+      } else {
+        setStickDir(dy > 0 ? [0, 1] : [0, -1]);
       }
-    };
-    btn.addEventListener("touchend", endHandler, { passive: false });
-    btn.addEventListener("touchcancel", endHandler, { passive: false });
-    // Mouse fallback for desktop testing
-    btn.addEventListener("mousedown", (e) => { e.preventDefault(); pressDir(dir, btn); });
-    btn.addEventListener("mouseup",   (e) => { e.preventDefault(); releaseDir(dir, btn); });
-    btn.addEventListener("mouseleave",(e) => { releaseDir(dir, btn); });
-  });
+    } else {
+      // Already active. Check perpendicular motion for a snappy switch.
+      const horizontal = cur[1] === 0;
+      const perp = horizontal ? dy : dx;
+      const para = horizontal ? dx : dy;
+
+      if (Math.abs(perp) >= SWITCH_THRESHOLD) {
+        // Switch to the perpendicular direction.
+        const newDir = horizontal
+          ? (perp > 0 ? [0, 1] : [0, -1])
+          : (perp > 0 ? [1, 0] : [-1, 0]);
+        setStickDir(newDir);
+        // Re-anchor the origin's perpendicular axis to the current touch position
+        // so the *next* perpendicular switch (back, or further) starts from zero.
+        if (horizontal) {
+          // Was horizontal, now vertical. The new "perp" axis is x.
+          stickState.originX = clientX;
+        } else {
+          stickState.originY = clientY;
+        }
+      } else if (Math.abs(para) < DEAD_ZONE * 0.4 && Math.abs(perp) < DEAD_ZONE * 0.4) {
+        // Thumb has come back near origin on both axes — release.
+        setStickDir(null);
+      }
+      // Otherwise: keep the current direction. Don't second-guess small wobble.
+    }
+    updateThumb(clientX, clientY);
+  }
+
+  stickEl.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    if (stickState.touchId !== null) return; // ignore extra fingers
+    const t = e.changedTouches[0];
+    stickState.touchId = t.identifier;
+    // Origin is where you first touched, so the gesture is relative to that point.
+    stickState.originX = t.clientX;
+    stickState.originY = t.clientY;
+    stickEl.classList.add("active");
+    processTouch(t.clientX, t.clientY);
+  }, { passive: false });
+
+  stickEl.addEventListener("touchmove", (e) => {
+    if (stickState.touchId === null) return;
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier !== stickState.touchId) continue;
+      processTouch(t.clientX, t.clientY);
+    }
+  }, { passive: false });
+
+  function endStick(e) {
+    if (stickState.touchId === null) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier === stickState.touchId) {
+        stickState.touchId = null;
+        setStickDir(null);
+        stickEl.classList.remove("active");
+        return;
+      }
+    }
+  }
+  stickEl.addEventListener("touchend", endStick, { passive: false });
+  stickEl.addEventListener("touchcancel", endStick, { passive: false });
 
   // Tap on menu/gameover overlay to start (ignore taps on the input field)
   function overlayTap(e) {
