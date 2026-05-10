@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>GRIDTRACER</title>
+<title>GRIDRUNNER</title>
 <style>
   :root {
     --bg: #000;
@@ -210,7 +210,7 @@
 
 <div class="overlay" id="menu">
   <div class="panel">
-    <h1>GRID<span class="accent">TRACER</span></h1>
+    <h1>GRID<span class="accent">RUNNER</span></h1>
     <p>Paint every line. Don't get caught.</p>
     <p style="margin-top:18px;">Enter name</p>
     <input id="name" maxlength="12" autocomplete="off">
@@ -246,22 +246,9 @@
 <script>
 (() => {
   // ------- storage -------
-  const KEY = "gridtracer.v1";
-  const LEGACY_KEY = "gridrunner.v1"; // pre-rename; one-time migration
+  const KEY = "gridrunner.v1";
   const load = () => {
-    try {
-      const fresh = localStorage.getItem(KEY);
-      if (fresh) return JSON.parse(fresh) || {};
-      // Migrate from old key if present
-      const legacy = localStorage.getItem(LEGACY_KEY);
-      if (legacy) {
-        const parsed = JSON.parse(legacy) || {};
-        localStorage.setItem(KEY, legacy);
-        localStorage.removeItem(LEGACY_KEY);
-        return parsed;
-      }
-      return {};
-    }
+    try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
     catch { return {}; }
   };
   const save = (o) => {
@@ -938,8 +925,7 @@
     originX: 0, originY: 0,
     dir: null,           // current 4-way direction [dx,dy] or null
   };
-  const DEAD_ZONE = 8;        // px before any direction registers from neutral
-  const SWITCH_THRESHOLD = 10; // px of perpendicular motion to switch active direction
+  const DEAD_ZONE = 8;   // px before any direction registers (small for snappy turns)
   const MAX_RADIUS = 70; // visual cap for the thumb dot
 
   function setStickDir(dir) {
@@ -983,56 +969,17 @@
     thumbEl.style.top  = (rect.height/2 + dy) + "px";
   }
 
-  // Direction-change physics:
-  //  - From neutral, displacement must exceed DEAD_ZONE before registering.
-  //  - Once active, switching to a perpendicular direction only needs
-  //    SWITCH_THRESHOLD pixels of motion in the new axis. The origin's
-  //    perpendicular component is then snapped to the current touch position
-  //    so further switches are equally cheap.
-  //  - Going BACK to the same axis after a perpendicular switch also takes
-  //    only SWITCH_THRESHOLD pixels.
-  //  - The active direction stays "locked" against tiny jitter on the parallel
-  //    axis (no need to re-cross threshold to keep going).
   function processTouch(clientX, clientY) {
     const dx = clientX - stickState.originX;
     const dy = clientY - stickState.originY;
+    const absX = Math.abs(dx), absY = Math.abs(dy);
     const dist = Math.hypot(dx, dy);
-    const cur = stickState.dir;
-
-    if (!cur) {
-      // From neutral: need to clear the dead zone to register anything.
-      if (dist < DEAD_ZONE) {
-        setStickDir(null);
-      } else if (Math.abs(dx) > Math.abs(dy)) {
-        setStickDir(dx > 0 ? [1, 0] : [-1, 0]);
-      } else {
-        setStickDir(dy > 0 ? [0, 1] : [0, -1]);
-      }
+    if (dist < DEAD_ZONE) {
+      setStickDir(null);
+    } else if (absX > absY) {
+      setStickDir(dx > 0 ? [1, 0] : [-1, 0]);
     } else {
-      // Already active. Check perpendicular motion for a snappy switch.
-      const horizontal = cur[1] === 0;
-      const perp = horizontal ? dy : dx;
-      const para = horizontal ? dx : dy;
-
-      if (Math.abs(perp) >= SWITCH_THRESHOLD) {
-        // Switch to the perpendicular direction.
-        const newDir = horizontal
-          ? (perp > 0 ? [0, 1] : [0, -1])
-          : (perp > 0 ? [1, 0] : [-1, 0]);
-        setStickDir(newDir);
-        // Re-anchor the origin's perpendicular axis to the current touch position
-        // so the *next* perpendicular switch (back, or further) starts from zero.
-        if (horizontal) {
-          // Was horizontal, now vertical. The new "perp" axis is x.
-          stickState.originX = clientX;
-        } else {
-          stickState.originY = clientY;
-        }
-      } else if (Math.abs(para) < DEAD_ZONE * 0.4 && Math.abs(perp) < DEAD_ZONE * 0.4) {
-        // Thumb has come back near origin on both axes — release.
-        setStickDir(null);
-      }
-      // Otherwise: keep the current direction. Don't second-guess small wobble.
+      setStickDir(dy > 0 ? [0, 1] : [0, -1]);
     }
     updateThumb(clientX, clientY);
   }
